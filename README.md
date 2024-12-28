@@ -9,10 +9,13 @@
 
 * [1. MySQL과 MariaDB개요](#1-mysql과-mariadb개요)
   * [구조적 차이](#구조적-차이)
-* [2. SQL 튜닝용어를 직관적으로 이해하기](#2-sql-튜닝용어를-직관적으로-이해하기)
+* [2. SQL 튜닝용어를 직관적으로 이해하기](#2-SQL-튜닝용어를-직관적으로-이해하기)
   * [물리 엔진과 오브젝트 용어](#물리-엔진과-오브젝트-용어)
   * [논리적인 SQL 개념 용어](#논리적인-sql-개념-용어)
   * [개념적인 튜닝 용어](#개념적인-튜닝-용어)
+* [3. SQL 튜닝의 실행 계획 파헤치기](#3-SQL-튜닝의-실행-계획-파헤치기)
+  * [기본 실행 계획 항목 분석](#기본-실행-계획-항목-분석)
+  * [좋고 나쁨을 판단하는 기준](#좋고-나쁨을-판단하는-기준)
   
   
 ## 1. MySQL과 MariaDB개요
@@ -42,7 +45,7 @@ SELECT @@version;
   트랜잭션 쓰기(UPDATE, INSERT, DELETE) ,읽기(SELECT) 분리하여 처리량 증가 기법
   
   
-## 2.SQL 튜닝용어를 직관적으로 이해하기
+## 2. SQL 튜닝용어를 직관적으로 이해하기
 ### 물리 엔진과 오브젝트 용어
 
 - MySQL 엔진
@@ -292,3 +295,71 @@ ANALYZE TABLE 사원 UPDATE HISTOGRAM ON 이름;
 SELECT * FROM INFORMATION_SCHEMA.COLUMN_STATISTICS;
 를 통해서 결과 확인
 ```
+
+## 3. SQL 튜닝의 실행 계획 파헤치기
+### 실행 계획 수행
+- 3가지 실행 계획 수행문이 있습니다. 어떤 수행문을 사용하든지 결과는 똑같습니다.
+  - EXPLAIN SQL 문;
+  - DESCRIBE SQL 문;
+  - DESC SQL 문;
+- 실행 계획 수행 (MySQL)
+```sql
+-- MariaDB에 비해 partitions, filtered열이 추가되면서 더많은 정보를 보여줍니다.
+EXPLAIN SELECT * FROM 사원
+WHERE 사원번호 BETWEEN 10001 AND 20000;
+
+```
+- 실행 계획 수행 (MariaDB)
+```sql
+-- 10.0.5 이상에서는 UPDATE, DELETE 문에서도 실행 계획을 보여줍니다.
+EXPLAIN SELECT * FROM 사원
+WHERE 사원번호 BETWEEN 10001 AND 20000;
+
+```
+
+### 기본 실행 계획 항목 분석
+- id : SQL 문이 실행 되는 순서를 표시.
+- select_type : 서브쿼리 인지, UNION 으로 묶여있는지 알려주는 정보.
+  - SIMPLE : UNION이나 내부 쿼리가 없는 SELECT 문 을 의미. 단순한 쿼리.
+  - PRIMARY : 서브쿼리를 포함한 SELECT 문이거나, UNION이 포함된 SQL 문에서 첫번째로 작성된 쿼리 문이다.
+  - SUBQUERY : 독립적으로 실행 되는 서브쿼리를 의미.
+  - DERIVED : FROM 절에 작성된 서브쿼리를 의미.
+  - UNION : UNION 및 UNION ALL 구문으로 합쳐진 SELECT 문 첫 번째 SELECT 구문을 제외한 이후이 SELECT 구문을 나타낸다.
+  - UNION RESULT : UNION ALL 이 아닌 UNION 구문으로 SELECT 절을 결합했을 때 출력됩니다.
+  - DEPENDENT SUBQUERY : UNION, UNION ALL을 사용하는 서브쿼리가 메인 테이블의 영향을 받는 경우로, UNION 으로 연결된 단위 쿼리들 중에서 처음으로 작성한 단위 쿼리에 해당되는 경우 입니다.
+  - DEPENDENT UNION : DEPENDENT SUBQUERY 와 조건은 동일하고, 두번째 단위 쿼리를 말한다.
+  - UNCHCHEABLE SUBQUERY : 메모리에 상주하여 재활용되어야 할 서브쿼리가 재사용되지 못할 때 출력되는 유형입니다.
+  - MATERIALIZED : IN 절 구문에 연결된 서브쿼리가 임시 테이블을 생성한 뒤, 조인이나 가공 작업을 수행할 때 출력되는 유형입니다.
+- table : 말 그대로 테이블, 테이블명을 표시하는 항목입니다.
+- partition : 데이터가 저장된 논리적인 영역을 표시하는 항목입니다. 사전의 정의한 전체 파티션중 특정 파티션에 선택적으로 접근하는것이 성능측면에서 유리합니다.
+  많은 파티션에 접근한다면 파티션 정의를 튜닝해야합니다.
+- type : 테이블의 데이터를 어떻게 찾을지에 대한 정보를 제공합니다. 인덱스를 통해 탐색할지에 대한 정보를 해석할 수 있습니다.
+- key_len : 인덱스 전체를 사용하거나 일부를 사용합니다. 사용한 인덱스 바이트 수를 나타냅니다.
+- ref : 어떤조건으 해당테이블에 엑세스 되었는지를 알려주는 정보 입니다.
+- rows : 접근하는 데이터의 모든행수를 나타내는 예측 항목입니다. SQL 문의 최종 결과 건수와 비교해 차이가 클경우 튜닝의 대상이 될 수 있습니다.
+- filtered : DB 엔진에서 가져온 데이터 대상으로 필터 조건에 따라 어느정도 비율로 데이터를 제거했는지를 의미하는 항목입니다.
+- extra : SQL문을 어떻게 수행할 것인지에 관한 추가정보를 보여주는 항목입니다.
+
+### 좋고 나쁨을 판단하는 기준
+- select type 항목
+  
+  | 좋음      | 나쁨          |
+  |---------|-------------|
+  | SIMPLE  | DEPENDENT   |
+  | PRIMARY | UNCACHEABLE |
+  | DERIVED |             |
+
+- type 항목
+
+  | 좋음     | 나쁨           |
+  |--------|--------------|
+  | system | index        |
+  | const  | all          | 
+  | eq_ref |              |
+
+- extra 항목
+
+  | 좋음          | 나쁨              |
+  |-------------|-----------------|
+  | Using index | using filesort  |
+  |             | using temporary |
